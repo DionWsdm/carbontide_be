@@ -1,3 +1,4 @@
+import math
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
@@ -273,12 +274,49 @@ class ProjectWithMRVCreateSerializer(serializers.Serializer):
             )
             mrv = MRV.objects.create(project=project, **mrv_data)
 
+            listing = MarketplaceListing.objects.create(
+                project=project,
+                price_per_credit=0,   
+            )
+
+            available = self.calcIssuableCredits(mrv)
+
+            CreditInventory.objects.create(
+                listing=listing,
+                total_issued=available,
+                available=available,
+                sold=0,
+                reserved=0,
+                retired=0,
+                buffer=0,
+            )
+
         return {"project": project, "mrv": mrv}
 
     def to_representation(self, instance):
         return {
             "project": ProjectDetailSerializer(instance["project"]).data,
         }
+
+    def calcBiomass(self, jumlahPohon: int, avgDbh, avgTinggi):
+        avgDbh = float(avgDbh)
+        avgTinggi = float(avgTinggi)
+
+        return jumlahPohon * 0.0673 * math.pow((0.8 * math.pow(avgDbh, 2) * avgTinggi), 0.976)
+
+    def calcGrossCarbon(self, biomass, rtsRatio, carbon):
+        return float(biomass) + float(rtsRatio) + float(carbon)
+
+    def calcIssuableCredits(self, mrv: MRV):
+        biomass = self.calcBiomass(mrv.tree_count, mrv.average_dbh, mrv.average_height)
+        grossCarbon = self.calcGrossCarbon(biomass, mrv.root_to_shoot_ratio, mrv.soil_organic_carbon)
+        if (mrv.risk_level == "low"):
+            risk = 0.1
+        elif (mrv.risk_level == "medium"):
+            risk = 0.15
+        else:
+            risk = 0.2
+        return (1-risk/100) * grossCarbon
 
 
 class DashboardSummarySerializer(serializers.Serializer):
